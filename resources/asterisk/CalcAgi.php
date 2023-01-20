@@ -576,7 +576,10 @@ class CalcAgi
             $sql = "SELECT * FROM pkg_trunk_group_trunk WHERE id_trunk_group = " . $this->tariffObj[0]['id_trunk_group'] . " ORDER BY RAND() ";
 
         } else if ($this->tariffObj[0]['trunk_group_type'] == 3) {
-            $sql = "SELECT *, (SELECT buyrate FROM pkg_rate_provider WHERE id_provider = tr.id_provider AND id_prefix = " . $this->tariffObj[0]['id_prefix'] . " LIMIT 1) AS buyrate  FROM pkg_trunk_group_trunk t  JOIN pkg_trunk tr ON t.id_trunk = tr.id WHERE id_trunk_group = " . $this->tariffObj[0]['id_trunk_group'] . " ORDER BY buyrate IS NULL , buyrate ";
+            // $sql = "SELECT *, (SELECT buyrate FROM pkg_rate_provider WHERE id_provider = tr.id_provider AND id_prefix = " . $this->tariffObj[0]['id_prefix'] . " LIMIT 1) AS buyrate  FROM pkg_trunk_group_trunk t  JOIN pkg_trunk tr ON t.id_trunk = tr.id WHERE id_trunk_group = " . $this->tariffObj[0]['id_trunk_group'] . " ORDER BY buyrate IS NULL , buyrate ";
+
+            $sql = "SELECT *,  (SELECT buyrate FROM pkg_rate_provider rp LEFT JOIN pkg_prefix pf1 ON pf1.id = rp.id_prefix WHERE id_provider = tr.id_provider AND '$destination' LIKE CONCAT(pf1.prefix, '%') ORDER BY LENGTH(pf1.prefix) DESC LIMIT 1 ) AS buyrate FROM pkg_trunk_group_trunk t  JOIN pkg_trunk tr ON t.id_trunk = tr.id WHERE id_trunk_group = '".$this->tariffObj[0]['id_trunk_group']."' ORDER BY buyrate IS NULL , buyrate";
+            $agi->verbose("AMIN-FIX DEST $destination, SQL : $sql", 3);
         }
         $modelTrunks = $agi->query($sql)->fetchAll(PDO::FETCH_OBJ);
 
@@ -625,13 +628,27 @@ class CalcAgi
             }
 
             if ($modelTrunk->credit_control == 1 && $provider_credit <= 0) {
-                $agi->verbose("Provider not have credit", 3);
+                $agi->verbose("AMIN-FIX: Provider [iD: ".$this->id_provider."] $trunkcode not have credit", 3);
                 continue;
             }
 
             if ($status == 0) {
-                $agi->verbose("Trunk is inactive", 3);
+                $agi->verbose("AMIN-FIX: Provider [iD: ".$this->id_provider."] $trunkcode Trunk is inactive", 3);
                 continue;
+            }
+            else { // AMIN-FIX Start
+                 $agi->verbose("AMIN-FIX LossPrevent, NUM $destination, PREF ".$this->tariffObj[0]['dialprefix'].", ClientCost: ".$this->tariffObj[0]['rateinitial'].", ProviderCost: ".$trunk->buyrate.", Prov-iD ".$this->id_provider."; $trunkcode", 3);
+                 if ( $this->tariffObj[0]['rateinitial'] < $trunk->buyrate ) {
+                      $agi->verbose("AMIN-FIX: Client cost for prefix ".$this->tariffObj[0]['dialprefix'].", = ".$this->tariffObj[0]['rateinitial']." less then ProviderCost: ".$trunk->buyrate.", Prov-iD ".$this->id_provider." $trunkcode; HANGUP!!", 3);
+                      $MAGNUS->hangup($agi, 21);  // Hangup and return 403 (see Magnus.php) to caller
+                 }
+                 if ( ! ($trunk->buyrate) or $trunk->buyrate == null or $trunk->buyrate == '') {
+                      $agi->verbose("AMIN-FIX: ProviderCost IS NULL : HANGUP!!", 3);
+                      $MAGNUS->hangup($agi, 21);  // Hangup and return 403 (see Magnus.php) to caller
+                 }
+
+
+                 // AMIN-FIX End
             }
 
             if (strncmp($MAGNUS->CallerID, $modelTrunk->cid_remove, strlen($modelTrunk->cid_remove)) == 0) {
